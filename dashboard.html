@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>금 스프레드 대시보드</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 24px; }
+  h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 4px; color: #f7c948; }
+  .subtitle { font-size: 0.8rem; color: #64748b; margin-bottom: 24px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .kpi { background: #1e2130; border-radius: 10px; padding: 16px; border: 1px solid #2d3148; }
+  .kpi-label { font-size: 0.72rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .kpi-value { font-size: 1.6rem; font-weight: 700; }
+  .kpi-value.positive { color: #f87171; }
+  .kpi-value.neutral { color: #60a5fa; }
+  .kpi-value.good { color: #34d399; }
+  .kpi-sub { font-size: 0.72rem; color: #64748b; margin-top: 4px; }
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 720px) { .charts-grid { grid-template-columns: 1fr; } }
+  .chart-box { background: #1e2130; border-radius: 10px; padding: 20px; border: 1px solid #2d3148; }
+  .chart-box h2 { font-size: 0.85rem; color: #94a3b8; margin-bottom: 16px; font-weight: 500; }
+  .chart-box.full { grid-column: 1 / -1; }
+  canvas { max-height: 220px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { text-align: left; padding: 10px 12px; color: #64748b; border-bottom: 1px solid #2d3148; font-weight: 500; }
+  td { padding: 9px 12px; border-bottom: 1px solid #1a1e2e; }
+  tr:hover td { background: #252a3d; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; }
+  .badge.high { background: #3f1515; color: #f87171; }
+  .badge.mid { background: #3f2a00; color: #fbbf24; }
+  .badge.low { background: #0f3320; color: #34d399; }
+  .error { color: #f87171; padding: 20px; text-align: center; }
+  #last-updated { font-size: 0.72rem; color: #475569; margin-top: 16px; text-align: right; }
+</style>
+</head>
+<body>
+<h1>금 스프레드 대시보드</h1>
+<div class="subtitle">국제 금 시세 대비 국내 실물 매수가 괴리율 추적</div>
+
+<div class="kpi-grid" id="kpi-grid"></div>
+
+<div class="charts-grid">
+  <div class="chart-box full">
+    <h2>괴리율 추이 (%)</h2>
+    <canvas id="spreadChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <h2>가격 추이 (원/g)</h2>
+    <canvas id="priceChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <h2>환율 추이 (KRW/USD)</h2>
+    <canvas id="fxChart"></canvas>
+  </div>
+</div>
+
+<div class="chart-box">
+  <h2>전체 데이터</h2>
+  <table id="data-table">
+    <thead>
+      <tr>
+        <th>날짜</th>
+        <th>국제금 (USD/oz)</th>
+        <th>환율</th>
+        <th>국제환산가 (원/g)</th>
+        <th>실물가 (원/g)</th>
+        <th>스프레드 (원)</th>
+        <th>괴리율</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<div id="last-updated"></div>
+
+<script>
+const CSV_PATH = './gold_spread_history.csv';
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',');
+  return lines.slice(1).map(line => {
+    const vals = line.split(',');
+    const obj = {};
+    headers.forEach((h, i) => obj[h.trim()] = vals[i]?.trim());
+    return obj;
+  }).filter(r => r.date);
+}
+
+function spreadBadge(pct) {
+  const v = parseFloat(pct);
+  if (v >= 14) return `<span class="badge high">+${v.toFixed(2)}%</span>`;
+  if (v >= 12) return `<span class="badge mid">+${v.toFixed(2)}%</span>`;
+  return `<span class="badge low">+${v.toFixed(2)}%</span>`;
+}
+
+function buildKPIs(data) {
+  const latest = data[data.length - 1];
+  const prev = data.length > 1 ? data[data.length - 2] : null;
+  const spreadDiff = prev ? (parseFloat(latest.spread_pct) - parseFloat(prev.spread_pct)).toFixed(2) : null;
+
+  const kpis = [
+    { label: '최신 괴리율', value: `+${parseFloat(latest.spread_pct).toFixed(2)}%`, cls: 'positive', sub: latest.date },
+    { label: '실물가 (원/g)', value: Number(latest.physical_krw_per_g).toLocaleString(), cls: 'neutral', sub: 'VAT 포함' },
+    { label: '국제환산가 (원/g)', value: Number(latest.intl_krw_per_g).toLocaleString(), cls: 'neutral', sub: 'VAT 미포함' },
+    { label: '원/달러 환율', value: Number(latest.krw_usd_rate).toLocaleString(), cls: 'neutral', sub: `$${parseFloat(latest.gold_usd_per_oz).toLocaleString()}/oz` },
+    { label: '전일 대비', value: spreadDiff !== null ? (spreadDiff >= 0 ? `+${spreadDiff}%p` : `${spreadDiff}%p`) : '-', cls: spreadDiff >= 0 ? 'positive' : 'good', sub: '괴리율 변화' },
+    { label: '평균 괴리율', value: `+${(data.reduce((s,r)=>s+parseFloat(r.spread_pct),0)/data.length).toFixed(2)}%`, cls: 'neutral', sub: `${data.length}일 평균` },
+  ];
+
+  document.getElementById('kpi-grid').innerHTML = kpis.map(k =>
+    `<div class="kpi"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.cls}">${k.value}</div><div class="kpi-sub">${k.sub}</div></div>`
+  ).join('');
+}
+
+function buildCharts(data) {
+  const labels = data.map(r => r.date);
+  const spreads = data.map(r => parseFloat(r.spread_pct));
+  const intl = data.map(r => parseInt(r.intl_krw_per_g));
+  const phys = data.map(r => parseInt(r.physical_krw_per_g));
+  const fx = data.map(r => parseFloat(r.krw_usd_rate));
+
+  const gridColor = '#2d3148';
+  const baseOpts = {
+    responsive: true, maintainAspectRatio: true,
+    plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+    scales: {
+      x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: gridColor } },
+      y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: gridColor } }
+    }
+  };
+
+  new Chart(document.getElementById('spreadChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '괴리율 (%)', data: spreads,
+        borderColor: '#f87171', backgroundColor: 'rgba(248,113,113,0.1)',
+        tension: 0.3, fill: true, pointRadius: 4, pointBackgroundColor: '#f87171'
+      }]
+    },
+    options: {
+      ...baseOpts,
+      plugins: {
+        ...baseOpts.plugins,
+        annotation: {
+          annotations: {
+            vat: { type: 'line', yMin: 10, yMax: 10, borderColor: '#60a5fa', borderWidth: 1, borderDash: [4,4],
+              label: { content: 'VAT 10%', display: true, color: '#60a5fa', font: { size: 10 } } }
+          }
+        }
+      }
+    }
+  });
+
+  new Chart(document.getElementById('priceChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '실물가', data: phys, borderColor: '#f87171', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 },
+        { label: '국제환산가', data: intl, borderColor: '#60a5fa', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 }
+      ]
+    },
+    options: { ...baseOpts }
+  });
+
+  new Chart(document.getElementById('fxChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: '원/달러', data: fx, borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,0.1)', tension: 0.3, fill: true, pointRadius: 3 }]
+    },
+    options: { ...baseOpts }
+  });
+}
+
+function buildTable(data) {
+  const rows = [...data].reverse().map(r =>
+    `<tr>
+      <td>${r.date}</td>
+      <td>$${parseFloat(r.gold_usd_per_oz).toLocaleString()}</td>
+      <td>${parseFloat(r.krw_usd_rate).toLocaleString()}</td>
+      <td>${parseInt(r.intl_krw_per_g).toLocaleString()}</td>
+      <td>${parseInt(r.physical_krw_per_g).toLocaleString()}</td>
+      <td>${parseInt(r.spread_krw).toLocaleString()}</td>
+      <td>${spreadBadge(r.spread_pct)}</td>
+    </tr>`
+  ).join('');
+  document.getElementById('table-body').innerHTML = rows;
+}
+
+async function init() {
+  try {
+    const res = await fetch(CSV_PATH + '?t=' + Date.now());
+    if (!res.ok) throw new Error('CSV 로드 실패');
+    const text = await res.text();
+    const data = parseCSV(text);
+    if (!data.length) throw new Error('데이터 없음');
+
+    buildKPIs(data);
+    buildCharts(data);
+    buildTable(data);
+    document.getElementById('last-updated').textContent = `마지막 업데이트: ${new Date().toLocaleString('ko-KR')}`;
+  } catch (e) {
+    document.body.innerHTML += `<div class="error">⚠ ${e.message} — CSV 파일을 같은 폴더에 두고 로컬 서버로 여세요.<br><br>터미널에서: <code>python -m http.server 8000</code></div>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
