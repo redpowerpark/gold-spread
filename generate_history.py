@@ -81,8 +81,9 @@ for date, gold_usd, krw_usd, physical_don, source in data:
     intl = round((gold_usd / TROY_OZ_TO_GRAM) * krw_usd)
     if physical_don:
         physical = round(physical_don / 3.75)
-        spread_krw = physical - intl
-        spread_pct = round((physical - intl) / intl * 100, 2)
+        physical_ex_vat = physical / 1.1
+        spread_krw = round(physical_ex_vat - intl)
+        spread_pct = round((physical_ex_vat - intl) / intl * 100, 2)
         rows.append(f"{date},{gold_usd},{krw_usd},{intl},{physical},{spread_krw},{spread_pct},{source}")
     else:
         rows.append(f"{date},{gold_usd},{krw_usd},{intl},,,,")
