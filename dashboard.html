@@ -101,16 +101,19 @@ function spreadBadge(pct) {
 
 function buildKPIs(data) {
   const latest = data[data.length - 1];
-  const prev = data.length > 1 ? data[data.length - 2] : null;
-  const spreadDiff = prev ? (parseFloat(latest.spread_pct) - parseFloat(prev.spread_pct)).toFixed(2) : null;
+  const latestWithSpread = [...data].reverse().find(r => r.spread_pct);
+  const prevWithSpread = latestWithSpread ? [...data].slice(0, data.indexOf(latestWithSpread)).reverse().find(r => r.spread_pct) : null;
+  const spreadDiff = latestWithSpread && prevWithSpread ? (parseFloat(latestWithSpread.spread_pct) - parseFloat(prevWithSpread.spread_pct)).toFixed(2) : null;
+  const spreadRows = data.filter(r => r.spread_pct);
+  const avgSpread = spreadRows.length ? (spreadRows.reduce((s,r)=>s+parseFloat(r.spread_pct),0)/spreadRows.length).toFixed(2) : null;
 
   const kpis = [
-    { label: '최신 괴리율', value: `+${parseFloat(latest.spread_pct).toFixed(2)}%`, cls: 'positive', sub: latest.date },
-    { label: '실물가 (원/g)', value: Number(latest.physical_krw_per_g).toLocaleString(), cls: 'neutral', sub: 'VAT 포함' },
-    { label: '국제환산가 (원/g)', value: Number(latest.intl_krw_per_g).toLocaleString(), cls: 'neutral', sub: 'VAT 미포함' },
+    { label: '최신 괴리율', value: latestWithSpread ? `+${parseFloat(latestWithSpread.spread_pct).toFixed(2)}%` : '—', cls: 'positive', sub: latestWithSpread ? latestWithSpread.date : '' },
+    { label: '실물가 (원/g)', value: latestWithSpread ? Number(latestWithSpread.physical_krw_per_g).toLocaleString() : '—', cls: 'neutral', sub: 'VAT 포함' },
+    { label: '국제환산가 (원/g)', value: Number(latest.intl_krw_per_g).toLocaleString(), cls: 'neutral', sub: latest.date },
     { label: '원/달러 환율', value: Number(latest.krw_usd_rate).toLocaleString(), cls: 'neutral', sub: `$${parseFloat(latest.gold_usd_per_oz).toLocaleString()}/oz` },
-    { label: '전일 대비', value: spreadDiff !== null ? (spreadDiff >= 0 ? `+${spreadDiff}%p` : `${spreadDiff}%p`) : '-', cls: spreadDiff >= 0 ? 'positive' : 'good', sub: '괴리율 변화' },
-    { label: '평균 괴리율', value: `+${(data.reduce((s,r)=>s+parseFloat(r.spread_pct),0)/data.length).toFixed(2)}%`, cls: 'neutral', sub: `${data.length}일 평균` },
+    { label: '전일 대비', value: spreadDiff !== null ? (spreadDiff >= 0 ? `+${spreadDiff}%p` : `${spreadDiff}%p`) : '—', cls: spreadDiff >= 0 ? 'positive' : 'good', sub: '괴리율 변화' },
+    { label: '평균 괴리율', value: avgSpread ? `+${avgSpread}%` : '—', cls: 'neutral', sub: `${spreadRows.length}일 기준` },
   ];
 
   document.getElementById('kpi-grid').innerHTML = kpis.map(k =>
@@ -120,9 +123,9 @@ function buildKPIs(data) {
 
 function buildCharts(data) {
   const labels = data.map(r => r.date);
-  const spreads = data.map(r => parseFloat(r.spread_pct));
+  const spreads = data.map(r => r.spread_pct ? parseFloat(r.spread_pct) : null);
   const intl = data.map(r => parseInt(r.intl_krw_per_g));
-  const phys = data.map(r => parseInt(r.physical_krw_per_g));
+  const phys = data.map(r => r.physical_krw_per_g ? parseInt(r.physical_krw_per_g) : null);
   const fx = data.map(r => parseFloat(r.krw_usd_rate));
 
   const gridColor = '#2d3148';
@@ -164,7 +167,7 @@ function buildCharts(data) {
     data: {
       labels,
       datasets: [
-        { label: '실물가', data: phys, borderColor: '#f87171', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 },
+        { label: '실물가', data: phys, borderColor: '#f87171', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3, spanGaps: false },
         { label: '국제환산가', data: intl, borderColor: '#60a5fa', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 }
       ]
     },
@@ -188,9 +191,9 @@ function buildTable(data) {
       <td>$${parseFloat(r.gold_usd_per_oz).toLocaleString()}</td>
       <td>${parseFloat(r.krw_usd_rate).toLocaleString()}</td>
       <td>${parseInt(r.intl_krw_per_g).toLocaleString()}</td>
-      <td>${parseInt(r.physical_krw_per_g).toLocaleString()}</td>
-      <td>${parseInt(r.spread_krw).toLocaleString()}</td>
-      <td>${spreadBadge(r.spread_pct)}</td>
+      <td>${r.physical_krw_per_g ? parseInt(r.physical_krw_per_g).toLocaleString() : '—'}</td>
+      <td>${r.spread_krw ? parseInt(r.spread_krw).toLocaleString() : '—'}</td>
+      <td>${r.spread_pct ? spreadBadge(r.spread_pct) : '—'}</td>
     </tr>`
   ).join('');
   document.getElementById('table-body').innerHTML = rows;
